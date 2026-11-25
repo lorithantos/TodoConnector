@@ -6,6 +6,12 @@
 # dotenv files
 .env
 
+# Claude Code: per-machine settings, and the git worktrees agents work in
+# (isolation: worktree). An untracked worktree makes the tree dirty, which the
+# deploy orchestrator refuses.
+.claude/settings.local.json
+.claude/worktrees/
+
 # User-specific files
 *.rsuser
 *.suo
