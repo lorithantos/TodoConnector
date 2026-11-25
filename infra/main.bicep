@@ -19,6 +19,10 @@ param planName string = 'ImageSelectorTest20240604205112Plan'
 @description('Resource group of the shared plan. A site lives beside its plan.')
 param planResourceGroup string = resourceGroup().name
 
+@description('Region of the shared plan; the site must be in it. Not readable from the existing plan at deployment start (BCP120), so it is stated, matching ImageSelectorV2 infra\\shared-plan.bicep.')
+param planLocation string = 'westus'
+
+@description('Region of resources that need not follow the plan (the managed identity).')
 param location string = resourceGroup().location
 
 @description('Application (client) id of the Entra app registration.')
@@ -59,7 +63,10 @@ var allowedUserSettings = [for (entry, i) in allowedUsers: {
 
 resource site 'Microsoft.Web/sites@2024-04-01' = {
   name: appName
-  location: location
+  // A site must be in its plan's region. The plan is in westus while Lori_Photography itself is
+  // westus3, so resourceGroup().location put the site in the wrong region and the first deploy
+  // (2026-11-25) failed with "Cannot find serverFarm". The identity can live anywhere.
+  location: planLocation
   kind: 'app'
   identity: {
     type: 'UserAssigned'
