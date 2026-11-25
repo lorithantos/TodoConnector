@@ -21,6 +21,7 @@
     <Using Include="System.Text.Json" />
     <Using Include="Microsoft.AspNetCore.Hosting" />
     <Using Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <Using Include="Microsoft.Extensions.Logging" />
     <Using Include="Microsoft.Extensions.Options" />
     <Using Include="TodoMcp.Auth" />
     <Using Include="TodoMcp.Todo" />

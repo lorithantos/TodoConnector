@@ -7,6 +7,7 @@ namespace TodoMcp.Tests;
 public class FacadeGuardTests(FacadeTests.Factory factory) : IClassFixture<FacadeTests.Factory>
 {
     private const string Callback = "https://claude.ai/api/mcp/auth_callback";
+    private const string EntraCallback = "https://todo.example.net/oauth/callback";
 
     private static readonly EntraSettings Entra = new EntraSettings("https://login.microsoftonline.com/", "common", "cid");
 
@@ -48,7 +49,7 @@ public class FacadeGuardTests(FacadeTests.Factory factory) : IClassFixture<Facad
             ["code"] = "c",
             ["code_verifier"] = "v",
             ["redirect_uri"] = "https://evil.example/cb",
-        }, Entra, Secret, new TodoMcpOptions(), out string? error);
+        }, Entra, Secret, new TodoMcpOptions(), EntraCallback, out string? error);
 
         Assert.Null(form);
         Assert.Contains("redirect_uri", error);
@@ -62,7 +63,7 @@ public class FacadeGuardTests(FacadeTests.Factory factory) : IClassFixture<Facad
             ["grant_type"] = "refresh_token",
             ["refresh_token"] = "r1",
             ["client_id"] = OAuthFacade.PublicClientId,
-        }, Entra, Secret, new TodoMcpOptions(), out string? error);
+        }, Entra, Secret, new TodoMcpOptions(), EntraCallback, out string? error);
 
         Assert.Null(error);
         Assert.Equal("refresh_token", form!["grant_type"]);
@@ -82,7 +83,7 @@ public class FacadeGuardTests(FacadeTests.Factory factory) : IClassFixture<Facad
             incoming["refresh_token"] = refreshToken;
         }
 
-        Dictionary<string, string>? form = OAuthFacade.BuildEntraTokenForm(incoming, Entra, Secret, new TodoMcpOptions(), out string? error);
+        Dictionary<string, string>? form = OAuthFacade.BuildEntraTokenForm(incoming, Entra, Secret, new TodoMcpOptions(), EntraCallback, out string? error);
 
         Assert.Null(form);
         Assert.Equal("refresh_token is required.", error);

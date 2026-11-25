@@ -28,9 +28,11 @@
     An Entra app registration that accepts personal Microsoft accounts and work/school
     accounts, with v2 access tokens, the Application ID URI api://<appId>, an access_as_user
     scope, the delegated Microsoft Graph permissions Tasks.ReadWrite, User.Read and
-    offline_access, and Claude's two OAuth callbacks as reply URLs. A reused app keeps its
-    existing scope. It warns if the app still carries client secrets from the old setup; it
-    does not remove them.
+    offline_access, and exactly one web reply URL, <BaseUrl>/oauth/callback: Entra answers the
+    server, which logs the answer and forwards it to Claude, so Claude's own callbacks are not
+    reply URLs. The reply URL list is checked and replaced on every run, which removes any other
+    entry. A reused app keeps its existing scope. It warns if the app still carries client
+    secrets from the old setup; it does not remove them.
 
   -Stage Trust, idempotent:
     Reuses a federated credential that already has this issuer, subject and audience. Refuses,
@@ -55,6 +57,11 @@
 .PARAMETER CredentialName
   Name of the federated identity credential on the app registration.
 
+.PARAMETER BaseUrl
+  -Stage App: the web app's public base URL, lower case, exactly as infra/main.bicep sets
+  TodoMcp__PublicBaseUrl. The reply URL is this plus /oauth/callback, and Entra compares it
+  character for character with the redirect_uri the server sends.
+
 .EXAMPLE
   ./setup.ps1 -Stage App
 
@@ -65,7 +72,8 @@ param(
     [Parameter(Mandatory)] [ValidateSet('App', 'Trust')] [string] $Stage,
     [guid] $IdentityPrincipalId,
     [string] $DisplayName = 'Claude To Do connector',
-    [string] $CredentialName = 'LtTodoConnector-identity'
+    [string] $CredentialName = 'LtTodoConnector-identity',
+    [string] $BaseUrl = 'https://lttodoconnector.azurewebsites.net'
 )
 $ErrorActionPreference = 'Stop'
 $graphAppId = '00000003-0000-0000-c000-000000000000'
@@ -93,11 +101,16 @@ if ($Stage -eq 'Trust' -and -not $IdentityPrincipalId) {
 }
 
 if ($Stage -eq 'App') {
+    if ($BaseUrl -cne $BaseUrl.ToLowerInvariant()) {
+        throw "-BaseUrl '$BaseUrl' must be lower case: the server sends Entra its lower-case PublicBaseUrl (infra/main.bicep), and Entra compares reply URLs exactly."
+    }
+    $callbackUrl = "$($BaseUrl.TrimEnd('/'))/oauth/callback"
+
     Step "Entra app registration '$DisplayName'"
     $appId = Find-AppId
     if (-not $appId) {
         $appId = Az ad app create --display-name $DisplayName --sign-in-audience AzureADMyOrg `
-            --web-redirect-uris 'https://claude.ai/api/mcp/auth_callback' 'https://claude.com/api/mcp/auth_callback' `
+            --web-redirect-uris $callbackUrl `
             --query appId -o tsv
         Write-Host "Created app $appId"
     } else {
@@ -122,6 +135,17 @@ if ($Stage -eq 'App') {
     if ($state.audience -ne 'AzureADandPersonalMicrosoftAccount') {
         Az ad app update --id $appId --sign-in-audience AzureADandPersonalMicrosoftAccount | Out-Null
         Write-Host 'Audience set to personal + work accounts.'
+    }
+
+    # Also every run: an app created before the callback hop still lists Claude's two callbacks.
+    Step "Web reply URL: exactly $callbackUrl"
+    $redirects = @(Az ad app show --id $appId --query 'web.redirectUris' -o json | ConvertFrom-Json)
+    if ($redirects.Count -ne 1 -or $redirects[0] -cne $callbackUrl) {
+        # --web-redirect-uris replaces the whole list, so the old entries go with this one call.
+        Az ad app update --id $appId --web-redirect-uris $callbackUrl | Out-Null
+        Write-Host "Reply URLs were [$($redirects -join ', ')]; now [$callbackUrl]."
+    } else {
+        Write-Host 'Reply URL already correct.'
     }
 
     Step 'Application ID URI and the access_as_user scope'

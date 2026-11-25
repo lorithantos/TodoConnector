@@ -26,6 +26,7 @@ public class EntraCredentialTests
     /// <summary>What the deployment sets: the managed identity entry and no secret.</summary>
     private static Dictionary<string, string> ManagedIdentity() => new Dictionary<string, string>
     {
+        ["TodoMcp:PublicBaseUrl"] = "https://todo.example.net",
         ["AzureAd:ClientId"] = ClientId,
         ["AzureAd:ClientCredentials:0:SourceType"] = "SignedAssertionFromManagedIdentity",
         ["AzureAd:ClientCredentials:0:ManagedIdentityClientId"] = MiClientId,
@@ -114,6 +115,8 @@ public class EntraCredentialTests
         Assert.False(sent.Form.ContainsKey("client_secret"));
         Assert.Equal(ClientId, sent.Form["client_id"]);
         Assert.Equal("c1", sent.Form["code"]);
+        // Claude sent its own redirect_uri; Entra must get the authorize request's, the server's callback.
+        Assert.Equal("https://todo.example.net/oauth/callback", sent.Form["redirect_uri"]);
         Assert.Equal(ClientId, Assert.Single(factory.Assertions.RequestedFor));
     }
 

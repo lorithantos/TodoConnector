@@ -52,7 +52,9 @@ var baseSettings = [
   { name: 'AzureAd__ClientCredentials__0__SourceType', value: 'SignedAssertionFromManagedIdentity' }
   { name: 'AzureAd__ClientCredentials__0__ManagedIdentityClientId', value: identity.properties.clientId }
   { name: 'AzureAd__ClientCredentials__0__TokenExchangeUrl', value: 'api://AzureADTokenExchange/.default' }
-  { name: 'TodoMcp__PublicBaseUrl', value: 'https://${appName}.azurewebsites.net' }
+  // Lower case: the OAuth facade sends Entra {PublicBaseUrl}/oauth/callback, Entra compares it
+  // exactly with the reply URL setup.ps1 registers, and that one is lower case.
+  { name: 'TodoMcp__PublicBaseUrl', value: 'https://${toLower(appName)}.azurewebsites.net' }
   { name: 'TodoMcp__TimeZone', value: timeZone }
 ]
 

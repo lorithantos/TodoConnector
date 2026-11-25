@@ -23,6 +23,7 @@ agenda early in a conversation and bring up anything overdue.
 
 ```
 Claude ──OAuth──> this server's /oauth/* facade ──redirect / relay──> Entra ID (login.microsoftonline.com)
+Entra ──code or error──> /oauth/callback (logged) ──redirect──> Claude's callback
 Claude ──MCP + Entra access token──> /mcp ──on-behalf-of──> Microsoft Graph /me/todo
 ```
 
@@ -32,11 +33,32 @@ Claude ──MCP + Entra access token──> /mcp ──on-behalf-of──> Micr
   AADSTS9010010), so `Auth/OAuthFacade.cs` is a thin, stateless facade:
   * `/oauth/register` hands Claude a fixed public client id;
   * `/oauth/authorize` redirects to Entra with the real client id and the scope
-    `openid offline_access api://<client-id>/.default`, dropping `resource`;
+    `openid offline_access api://<client-id>/.default`, dropping `resource`. It sends Entra
+    this server's own `/oauth/callback` as the redirect URI, and as the state a payload
+    protected with ASP.NET Core Data Protection that carries Claude's redirect URI and Claude's
+    state and expires after 10 minutes. It also asks for `prompt=select_account`, so Microsoft
+    shows the account picker instead of signing in silently with the Windows account, and
+    shows its own errors on its page;
+  * `/oauth/callback` receives Entra's answer, logs it (an error at Warning with Entra's
+    `error_description`, the AADSTS text; a code at Information, without the code), and
+    redirects to Claude's callback with the code or the error and Claude's original state. A
+    state that does not unprotect, has expired, or names a redirect URI off the allow-list gets
+    a 400 and a Warning, and the browser is sent nowhere;
   * `/oauth/token` relays the code or refresh token to Entra and adds the app's credential: in
     Azure a client assertion from the managed identity, in local development a user-secret.
-  It stores nothing. Entra does the sign-in, consent and PKCE check, and only redirects to the
-  reply URLs on the app registration (Claude's callbacks).
+    For a code it sends Entra `/oauth/callback` as the redirect URI, because Entra requires the
+    one the authorize request used.
+  Every refusal is logged at Warning with its reason; codes, tokens and credentials never are.
+  It stores nothing: what the callback needs travels inside the state. Entra does the sign-in,
+  consent and PKCE check, and only redirects to the one reply URL on the app registration,
+  `https://lttodoconnector.azurewebsites.net/oauth/callback`. Claude's callback page drops its
+  query string, so before the callback hop a failed sign-in left no trace anywhere; now the
+  App Service log has Entra's answer.
+* The state is encrypted with the app's Data Protection key ring. On Windows App Service that
+  persists under `%HOME%\ASP.NET\DataProtection-Keys`, network storage every instance in one
+  deployment slot shares, unprotected at rest (the app logs "No XML encryptor configured" at
+  startup). Each slot has its own key ring, so a sign-in in flight across a slot swap or a new
+  site fails at the callback with a logged Warning; connect again.
 * The token Claude gets is for this app. `/mcp` validates it with Microsoft.Identity.Web, checks
   the caller against `TodoMcp:AllowedUsers`, and swaps it for a Graph token (`Tasks.ReadWrite`)
   with the on-behalf-of flow.
@@ -69,7 +91,9 @@ subscription, the .NET 10 SDK, and the Janet MCP tools (live Azure changes go th
 each one is prompted).
 
 1. **App registration.** `./setup.ps1 -Stage App` creates the app registration (or reuses the
-   one named "Claude To Do connector") and prints its `appId`. No secret is created.
+   one named "Claude To Do connector") and prints its `appId`. No secret is created. Its one
+   reply URL is `https://lttodoconnector.azurewebsites.net/oauth/callback` (set on every run;
+   `-BaseUrl` changes the host, lower case).
 2. **Infrastructure.** In a Claude session, run `azure_whatif` and read it, then `azure_deploy`,
    both with path `infra/main.bicep`, resource group `Lori_Photography` and the override
    `entraClientId=<appId>`. Leave `allowedUsers` out the first time. Note the outputs
@@ -78,10 +102,11 @@ each one is prompted).
    federated identity credential to the app registration. It is safe to re-run, and refuses
    to touch a same-named credential that trusts something else.
 4. **Code.** Deploy as under [Later deploys](#later-deploys).
-5. **Connect.** In Claude: **Settings > Connectors > Add custom connector**, paste the `mcpUrl`
-   output (`https://lttodoconnector.azurewebsites.net/mcp`), leave the OAuth client id and
-   secret empty, and connect. You'll sign in with Microsoft and consent to "Read and write
-   your tasks".
+5. **Connect.** In Claude: **Settings > Connectors > Add custom connector**, paste
+   `https://lttodoconnector.azurewebsites.net/mcp` (lower case, the host the server names
+   itself by), leave the OAuth client id and secret empty, and connect. Microsoft
+   shows its account picker: pick the account, sign in and consent to "Read and write your
+   tasks". If it fails, the reason is in the app's log as a Warning from `/oauth/callback`.
 6. **Let yourself in.** The allow-list is empty, so that first connection is refused. Copy the
    entry from the app's log line `... Add <tid>:<oid> to TodoMcp:AllowedUsers to let them in.`
    and repeat step 2 with the overrides `entraClientId=<appId>` and
@@ -136,7 +161,7 @@ fake Graph.
 | `AzureAd:TenantId` | `common` | `consumers` if you only ever use a personal account. |
 | `TodoMcp:AllowedUsers` | empty | `"<tid>:<oid>"` entries (tenant id and object id GUIDs). Empty lets nobody in; a malformed entry, an email address included, fails startup. Connect once and copy your entry from the refusal in the log. In Azure, the Bicep's `allowedUsers` parameter. |
 | `TodoMcp:TimeZone` | `America/Los_Angeles` | IANA or Windows id. The Bicep's `timeZone` parameter. |
-| `TodoMcp:PublicBaseUrl` | from request | Set by the Bicep template. |
+| `TodoMcp:PublicBaseUrl` | from request | Set by the Bicep template, lower case: `{PublicBaseUrl}/oauth/callback` must equal the reply URL on the app registration exactly. |
 
 ## Guesses to verify on first run
 

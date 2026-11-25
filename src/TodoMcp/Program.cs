@@ -36,6 +36,10 @@ builder.Services.AddSingleton<IClientAssertionSource, ManagedIdentityAssertionSo
 builder.Services.AddHttpClient<GraphTodoClient>(c => c.BaseAddress = new Uri("https://graph.microsoft.com/v1.0/"));
 builder.Services.AddSingleton(TimeProvider.System); // the one place the real clock is named
 builder.Services.AddSingleton<TodoClock>();
+// The OAuth facade's state through Entra. Default key ring: on Windows App Service it persists
+// under %HOME%\ASP.NET\DataProtection-Keys, which every instance of the site shares.
+builder.Services.AddDataProtection();
+builder.Services.AddSingleton<OAuthStateProtector>();
 
 builder.Services
     .AddMcpServer(o =>

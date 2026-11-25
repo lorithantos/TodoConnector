@@ -1,4 +1,7 @@
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Primitives;
 
 namespace TodoMcp.Tests;
@@ -7,15 +10,28 @@ public class FacadeTests(FacadeTests.Factory factory) : IClassFixture<FacadeTest
 {
     public sealed class Factory : WebApplicationFactory<Program>
     {
+        /// <summary>The app's clock: fixed, so state expiry is decided by the test, never the system clock.</summary>
+        public static readonly DateTimeOffset Now = new DateTimeOffset(2026, 11, 25, 12, 0, 0, TimeSpan.Zero);
+
+        public LogCapture Logs { get; } = new();
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("AzureAd:ClientId", "11111111-2222-3333-4444-555555555555");
             builder.UseSetting("AzureAd:ClientSecret", "test-secret");
             builder.UseSetting("TodoMcp:PublicBaseUrl", "https://todo.example.net");
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddSingleton<TimeProvider>(new FixedTime(Now));
+                // In memory, so the tests write no key ring into the user profile.
+                services.AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider());
+                services.AddSingleton<ILoggerProvider>(this.Logs);
+            });
         }
     }
 
     private const string Callback = "https://claude.ai/api/mcp/auth_callback";
+    private const string EntraCallback = "https://todo.example.net/oauth/callback";
 
     private HttpClient Client() => factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
@@ -57,7 +73,7 @@ public class FacadeTests(FacadeTests.Factory factory) : IClassFixture<FacadeTest
     }
 
     [Fact]
-    public async Task Authorize_redirects_to_entra_without_the_resource_parameter()
+    public async Task Authorize_redirects_to_entra_via_the_callback_with_a_protected_state_and_no_resource()
     {
         string url = QueryHelpers.AddQueryString("/oauth/authorize", new Dictionary<string, string?>
         {
@@ -78,8 +94,13 @@ public class FacadeTests(FacadeTests.Factory factory) : IClassFixture<FacadeTest
         Dictionary<string, StringValues> q = QueryHelpers.ParseQuery(location.Query);
         Assert.Equal("11111111-2222-3333-4444-555555555555", q["client_id"]);
         Assert.Equal("openid offline_access api://11111111-2222-3333-4444-555555555555/.default", q["scope"]);
-        Assert.Equal("abc", q["state"]);
         Assert.False(q.ContainsKey("resource"));
+        // Entra answers the server, not Claude, and shows the account picker.
+        Assert.Equal(EntraCallback, q["redirect_uri"]);
+        Assert.Equal("select_account", q["prompt"]);
+        // Claude's state travels inside the protected state, never in the clear.
+        Assert.NotEqual("abc", q["state"].ToString());
+        Assert.False(string.IsNullOrEmpty(q["state"]));
     }
 
     [Fact]
@@ -104,12 +125,14 @@ public class FacadeTests(FacadeTests.Factory factory) : IClassFixture<FacadeTest
             ["redirect_uri"] = Callback,
             ["resource"] = "https://todo.example.net/mcp",
             ["client_id"] = OAuthFacade.PublicClientId,
-        }, entra, Secret, new TodoMcpOptions(), out string? error);
+        }, entra, Secret, new TodoMcpOptions(), EntraCallback, out string? error);
 
         Assert.Null(error);
         Assert.Equal("cid", form!["client_id"]);
         Assert.Equal("secret", form["client_secret"]);
         Assert.False(form.ContainsKey("resource"));
+        // Entra requires the authorize request's redirect_uri, which was the server's callback.
+        Assert.Equal(EntraCallback, form["redirect_uri"]);
     }
 
     [Fact]
@@ -125,7 +148,7 @@ public class FacadeTests(FacadeTests.Factory factory) : IClassFixture<FacadeTest
         {
             ["client_assertion_type"] = EntraManagedIdentityCredential.JwtBearerAssertionType,
             ["client_assertion"] = "mi-assertion",
-        }, new TodoMcpOptions(), out string? error);
+        }, new TodoMcpOptions(), EntraCallback, out string? error);
 
         Assert.Null(error);
         Assert.Equal(EntraManagedIdentityCredential.JwtBearerAssertionType, form!["client_assertion_type"]);
@@ -138,6 +161,6 @@ public class FacadeTests(FacadeTests.Factory factory) : IClassFixture<FacadeTest
     {
         EntraSettings entra = new EntraSettings("https://login.microsoftonline.com/", "common", "cid");
         Assert.Null(OAuthFacade.BuildEntraTokenForm(
-            new Dictionary<string, string> { ["grant_type"] = "client_credentials" }, entra, Secret, new TodoMcpOptions(), out _));
+            new Dictionary<string, string> { ["grant_type"] = "client_credentials" }, entra, Secret, new TodoMcpOptions(), EntraCallback, out _));
     }
 }
