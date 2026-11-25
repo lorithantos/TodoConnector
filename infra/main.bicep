@@ -86,6 +86,32 @@ resource site 'Microsoft.Web/sites@2024-04-01' = {
   }
 }
 
+// Application logging to the file system, read with `az webapp log tail`: the allow-list bootstrap
+// copies the refused caller's tid:oid from there. Filesystem application logging switches itself
+// off after 12 hours on Windows, which suits a bootstrap; turn it back on to debug later.
+resource logs 'Microsoft.Web/sites/config@2024-04-01' = {
+  parent: site
+  name: 'logs'
+  properties: {
+    applicationLogs: {
+      fileSystem: {
+        level: 'Warning'
+      }
+    }
+    detailedErrorMessages: {
+      enabled: false
+    }
+    failedRequestsTracing: {
+      enabled: false
+    }
+    httpLogs: {
+      fileSystem: {
+        enabled: false
+      }
+    }
+  }
+}
+
 output url string = 'https://${site.properties.defaultHostName}'
 output mcpUrl string = 'https://${site.properties.defaultHostName}/mcp'
 

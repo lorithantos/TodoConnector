@@ -5,6 +5,10 @@ using TodoMcp.Auth;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
+// On App Service, log to the platform's application log so `az webapp log tail` shows it -- the
+// allow-list bootstrap depends on reading the refusal line there. Off App Service it does nothing.
+builder.Logging.AddAzureWebAppDiagnostics();
+
 builder.Services.AddOptions<TodoMcpOptions>()
     .Bind(builder.Configuration.GetSection(TodoMcpOptions.SectionName))
     .ValidateOnStart(); // a malformed TodoMcp:AllowedUsers entry stops the app rather than being ignored
