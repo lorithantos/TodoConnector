@@ -30,7 +30,7 @@ public class McpEndToEndTests(McpEndToEndTests.Factory factory) : IClassFixture<
         {
             builder.UseSetting("AzureAd:ClientId", "11111111-2222-3333-4444-555555555555");
             builder.UseSetting("AzureAd:ClientSecret", "test-secret");
-            builder.UseSetting("TodoMcp:AllowedUsers:0", "me@example.com");
+            builder.UseSetting("TodoMcp:AllowedUsers:0", "9188040d-6c67-4c5b-b112-36a304b66dad:00000000-0000-0000-0000-0000000000e2");
             builder.ConfigureTestServices(services =>
             {
                 services.AddAuthentication().AddScheme<AuthenticationSchemeOptions, TestAuth>("Test", _ => { });
@@ -51,7 +51,11 @@ public class McpEndToEndTests(McpEndToEndTests.Factory factory) : IClassFixture<
     {
         protected override Task<AuthenticateResult> HandleAuthenticateAsync() =>
             Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim("preferred_username", "me@example.com")], "Test")), "Test")));
+                [
+                    new Claim("tid", "9188040d-6c67-4c5b-b112-36a304b66dad"),
+                    new Claim("oid", "00000000-0000-0000-0000-0000000000e2"),
+                    new Claim("preferred_username", "me@example.com"),
+                ], "Test")), "Test")));
     }
 
     private sealed class FakeHeaders : IAuthorizationHeaderProvider

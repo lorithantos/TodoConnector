@@ -12,9 +12,10 @@ public sealed class TodoMcpOptions
     public string? PublicBaseUrl { get; set; }
 
     /// <summary>
-    /// Who may use the connector. Each entry is an Entra object id (oid) or a sign-in name
-    /// (preferred_username, e.g. you@outlook.com). Empty means nobody: the server refuses
-    /// everyone and logs the caller's oid and name so you can add yourself.
+    /// Who may use the connector. Each entry is "&lt;tid&gt;:&lt;oid&gt;": the caller's Entra tenant id
+    /// and object id, two GUIDs joined by a colon. Sign-in names are not accepted, and a
+    /// malformed entry fails startup. Empty means nobody: the server refuses everyone and
+    /// logs the caller's entry ready to paste so you can add yourself.
     /// </summary>
     public List<string> AllowedUsers { get; set; } = [];
 

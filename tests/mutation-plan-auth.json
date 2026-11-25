@@ -1,0 +1,95 @@
+{
+  "configuration": "Debug",
+  "mutations": [
+    {
+      "name": "compare oid only (drop the tid comparison)",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "AllowedUsers.Any(a => string.Equals(a, key, StringComparison.OrdinalIgnoreCase));",
+      "replace": "AllowedUsers.Any(a => a.EndsWith(key[key.IndexOf(':')..], StringComparison.OrdinalIgnoreCase));"
+    },
+    {
+      "name": "compare tid only (drop the oid comparison)",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "AllowedUsers.Any(a => string.Equals(a, key, StringComparison.OrdinalIgnoreCase));",
+      "replace": "AllowedUsers.Any(a => a.StartsWith(key[..(key.IndexOf(':') + 1)], StringComparison.OrdinalIgnoreCase));"
+    },
+    {
+      "name": "re-admit preferred_username",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "AllowedUsers.Any(a => string.Equals(a, key, StringComparison.OrdinalIgnoreCase));",
+      "replace": "AllowedUsers.Any(a => string.Equals(a, key, StringComparison.OrdinalIgnoreCase) || string.Equals(a, user.FindFirstValue(\"preferred_username\"), StringComparison.OrdinalIgnoreCase));"
+    },
+    {
+      "name": "case-sensitive comparison",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "AllowedUsers.Any(a => string.Equals(a, key, StringComparison.OrdinalIgnoreCase));",
+      "replace": "AllowedUsers.Any(a => string.Equals(a, key, StringComparison.Ordinal));"
+    },
+    {
+      "name": "empty list lets everyone in",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "return options.CurrentValue.AllowedUsers.Any(",
+      "replace": "return options.CurrentValue.AllowedUsers.Count == 0 || options.CurrentValue.AllowedUsers.Any("
+    },
+    {
+      "name": "refuse everyone (consumer ignores the list)",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "return options.CurrentValue.AllowedUsers.Any(",
+      "replace": "return options.CurrentValue.AllowedUsers.Count < 0 && options.CurrentValue.AllowedUsers.Any("
+    },
+    {
+      "name": "missing tid or oid fails open",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "return false;",
+      "replace": "return true;"
+    },
+    {
+      "name": "missing tid falls back to matching oid alone",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "return false;",
+      "replace": "return user.GetObjectId() is string o && options.CurrentValue.AllowedUsers.Any(a => a.EndsWith(\":\" + o, StringComparison.OrdinalIgnoreCase));"
+    },
+    {
+      "name": "read tid from the long claim URI only (pins that GetTenantId reads the short tid claim)",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "string? tid = user.GetTenantId();",
+      "replace": "string? tid = user.FindFirstValue(\"http://schemas.microsoft.com/identity/claims/tenantid\");"
+    },
+    {
+      "name": "validator accepts every entry",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": ".Where(e => !AllowedUserCheck.IsWellFormed(e))",
+      "replace": ".Where(e => false)"
+    },
+    {
+      "name": "validator drops the exact-length check (accepts padded GUIDs)",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "parts[0].Length == 36 && ",
+      "replace": ""
+    },
+    {
+      "name": "validator message does not name the entry",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "entry '{e}' is not",
+      "replace": "entry is not"
+    },
+    {
+      "name": "refusal log pastes the oid alone",
+      "path": "src/TodoMcp/Auth/AllowedUser.cs",
+      "find": "key, name, key);",
+      "replace": "key, name, context.User.GetObjectId());"
+    },
+    {
+      "name": "skip startup validation (no ValidateOnStart)",
+      "path": "src/TodoMcp/Program.cs",
+      "find": ".ValidateOnStart(); // a malformed TodoMcp:AllowedUsers entry stops the app rather than being ignored",
+      "replace": "; // mutation: not validated at startup"
+    },
+    {
+      "name": "validator not registered",
+      "path": "src/TodoMcp/Program.cs",
+      "find": "builder.Services.AddSingleton<IValidateOptions<TodoMcpOptions>, AllowedUsersValidator>();",
+      "replace": ""
+    }
+  ]
+}

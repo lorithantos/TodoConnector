@@ -5,7 +5,10 @@ using TodoMcp.Auth;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-builder.Services.Configure<TodoMcpOptions>(builder.Configuration.GetSection(TodoMcpOptions.SectionName));
+builder.Services.AddOptions<TodoMcpOptions>()
+    .Bind(builder.Configuration.GetSection(TodoMcpOptions.SectionName))
+    .ValidateOnStart(); // a malformed TodoMcp:AllowedUsers entry stops the app rather than being ignored
+builder.Services.AddSingleton<IValidateOptions<TodoMcpOptions>, AllowedUsersValidator>();
 
 // Incoming tokens: issued by Entra for this app (api://{ClientId}). Outgoing: Graph via on-behalf-of.
 builder.Services

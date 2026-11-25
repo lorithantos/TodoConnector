@@ -39,8 +39,17 @@ Claude ──MCP + Entra access token──> /mcp ──on-behalf-of──> Micr
 * The token Claude gets is for this app. `/mcp` validates it with Microsoft.Identity.Web, checks
   the caller against `TodoMcp:AllowedUsers`, and swaps it for a Graph token (`Tasks.ReadWrite`)
   with the on-behalf-of flow.
-* Only accounts in `TodoMcp:AllowedUsers` (sign-in name or object id) get in. If the list is
-  empty, nobody does, and the log says the refused caller's oid and name.
+* Only accounts in `TodoMcp:AllowedUsers` get in. Each entry is `<tid>:<oid>`, the caller's
+  Entra tenant id and object id (two GUIDs joined by a colon, any case), and a caller gets in
+  only when both match one entry. Sign-in names are not accepted: Microsoft's
+  [claims validation guidance](https://learn.microsoft.com/entra/identity-platform/claims-validation)
+  says to authorize on the immutable `tid` and `oid` together, never on `preferred_username`,
+  `upn` or `email`, which are mutable and can be set by a tenant admin. An entry that is not
+  two GUIDs joined by a colon stops the app at startup with the entry named. If the list is
+  empty, nobody gets in. To add yourself: connect once, get refused, and copy the entry from
+  the log line `Refused caller tid:oid=<tid>:<oid> (shown as <name>, display only). Add
+  <tid>:<oid> to TodoMcp:AllowedUsers to let them in.` Personal Microsoft accounts all carry
+  tid `9188040d-6c67-4c5b-b112-36a304b66dad`.
 
 ## Setup (one time)
 
@@ -65,7 +74,7 @@ Later deploys: `./deploy.ps1 -AppName <app-name>`.
 ```powershell
 dotnet user-secrets --project src/TodoMcp set AzureAd:ClientId <client-id>
 dotnet user-secrets --project src/TodoMcp set AzureAd:ClientSecret <secret>
-dotnet user-secrets --project src/TodoMcp set "TodoMcp:AllowedUsers:0" you@outlook.com
+dotnet user-secrets --project src/TodoMcp set "TodoMcp:AllowedUsers:0" <tid>:<oid>
 dotnet test
 ```
 
@@ -80,7 +89,7 @@ fake Graph.
 | `AzureAd:ClientId` | | App registration's client id. |
 | `AzureAd:ClientSecret` | | App setting / user-secrets only. Key Vault reference is a sensible upgrade. |
 | `AzureAd:TenantId` | `common` | `consumers` if you only ever use a personal account. |
-| `TodoMcp:AllowedUsers` | empty | Sign-in names or object ids. |
+| `TodoMcp:AllowedUsers` | empty | `<tid>:<oid>` entries (tenant id and object id GUIDs). Empty lets nobody in; a malformed entry fails startup. Connect once and copy your entry from the refusal in the log. |
 | `TodoMcp:TimeZone` | `America/Los_Angeles` | IANA or Windows id. |
 | `TodoMcp:PublicBaseUrl` | from request | Set by the Bicep template. |
 
