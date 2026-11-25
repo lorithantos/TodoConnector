@@ -71,7 +71,11 @@ $ErrorActionPreference = 'Stop'
 $graphAppId = '00000003-0000-0000-c000-000000000000'
 $exchangeAudience = 'api://AzureADTokenExchange'
 function Step($m) { Write-Host "`n==> $m" -ForegroundColor Cyan }
-function Az { $out = & az @args; if ($LASTEXITCODE) { throw "az $args failed" }; $out }
+# The az executable itself, resolved once. PowerShell command names ignore case, so a bare `az`
+# inside the function Az below would call the function, not the CLI, and recurse until the call
+# depth overflows (it did, 2026-11-25, before anything was created).
+$azExe = (Get-Command az -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+function Az { $out = & $azExe @args; if ($LASTEXITCODE) { throw "az $args failed" }; $out }
 
 function Find-AppId {
     # The app registration by display name: $null when there is none, a refusal when the name
@@ -92,17 +96,33 @@ if ($Stage -eq 'App') {
     Step "Entra app registration '$DisplayName'"
     $appId = Find-AppId
     if (-not $appId) {
-        # Personal accounts require v2 access tokens, and that must be set before the audience changes.
         $appId = Az ad app create --display-name $DisplayName --sign-in-audience AzureADMyOrg `
             --web-redirect-uris 'https://claude.ai/api/mcp/auth_callback' 'https://claude.com/api/mcp/auth_callback' `
             --query appId -o tsv
-        Az ad app update --id $appId --set api.requestedAccessTokenVersion=2 | Out-Null
-        Az ad app update --id $appId --sign-in-audience AzureADandPersonalMicrosoftAccount | Out-Null
         Write-Host "Created app $appId"
     } else {
         Write-Host "Reusing app $appId"
     }
     $objectId = Az ad app show --id $appId --query id -o tsv
+
+    # Checked and applied on EVERY run, not only after a create: a run that failed between the
+    # create and these two steps (2026-11-25) must be finished by the next run, not skipped.
+    Step 'v2 access tokens, then personal + work accounts'
+    $state = Az ad app show --id $appId --query '{version:api.requestedAccessTokenVersion, audience:signInAudience}' -o json | ConvertFrom-Json
+    if ($state.version -ne 2) {
+        # Personal accounts require v2 access tokens, set before the audience changes. Through Graph,
+        # because a new app has no api object for 'az ad app update --set api.…' to reach into.
+        $tmp = New-TemporaryFile; Set-Content $tmp '{"api":{"requestedAccessTokenVersion":2}}'
+        try {
+            Az rest --method PATCH --uri "https://graph.microsoft.com/v1.0/applications/$objectId" `
+                --headers 'Content-Type=application/json' --body "@$tmp" | Out-Null
+        } finally { Remove-Item $tmp }
+        Write-Host 'Access tokens set to v2.'
+    }
+    if ($state.audience -ne 'AzureADandPersonalMicrosoftAccount') {
+        Az ad app update --id $appId --sign-in-audience AzureADandPersonalMicrosoftAccount | Out-Null
+        Write-Host 'Audience set to personal + work accounts.'
+    }
 
     Step 'Application ID URI and the access_as_user scope'
     $existingScope = Az ad app show --id $appId --query "api.oauth2PermissionScopes[?value=='access_as_user'].id | [0]" -o tsv
@@ -160,7 +180,7 @@ Step "Managed identity principal $principalId"
 # A user-assigned identity is a service principal in its tenant. Looking it up here proves it is
 # in the signed-in tenant (the app's), and catches the identity's client id passed by mistake:
 # 'az ad sp show' accepts an appId too, and then answers with a different object id.
-$spId = & az ad sp show --id $principalId --query id -o tsv 2>$null
+$spId = & $azExe ad sp show --id $principalId --query id -o tsv 2>$null
 if ($LASTEXITCODE -or -not $spId) {
     throw "No service principal $principalId in the signed-in tenant. Pass the identityPrincipalId output, and sign in to the tenant that holds both the identity and the app."
 }
