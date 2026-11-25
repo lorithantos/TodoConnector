@@ -43,5 +43,5 @@ public sealed class GraphTask
     [JsonPropertyName("completedDateTime")] public GraphDateTimeTimeZone? CompletedDateTime { get; set; }
     [JsonPropertyName("createdDateTime")] public DateTimeOffset? CreatedDateTime { get; set; }
 
-    [JsonIgnore] public bool IsCompleted => string.Equals(Status, "completed", StringComparison.OrdinalIgnoreCase);
+    [JsonIgnore] public bool IsCompleted => string.Equals(this.Status, "completed", StringComparison.OrdinalIgnoreCase);
 }

@@ -1,8 +1,6 @@
 using System.ComponentModel;
-using Microsoft.Identity.Web;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
-using TodoMcp.Todo;
 
 namespace TodoMcp.Tools;
 
@@ -20,12 +18,12 @@ public sealed class TodoTools(GraphTodoClient graph, TodoClock clock)
         [Description("How many days ahead to look. Default 7.")] int days_ahead = 7,
         CancellationToken ct = default) => await Run(async () =>
     {
-        var lists = await graph.GetListsAsync(ct);
-        var all = new List<(GraphTask, GraphTaskList)>();
-        foreach (var list in lists)
+        List<GraphTaskList> lists = await graph.GetListsAsync(ct);
+        List<ListedTask> all = new List<ListedTask>();
+        foreach (GraphTaskList list in lists)
         {
-            var tasks = await graph.GetTasksAsync(list.Id, includeCompleted: false, max: 500, ct);
-            all.AddRange(tasks.Select(t => (t, list)));
+            List<GraphTask> tasks = await graph.GetTasksAsync(list.Id, includeCompleted: false, max: 500, ct);
+            all.AddRange(tasks.Select(t => new ListedTask(t, list)));
         }
         return TaskViews.BuildAgenda(all, clock, Math.Clamp(days_ahead, 0, 60));
     });
@@ -45,8 +43,8 @@ public sealed class TodoTools(GraphTodoClient graph, TodoClock clock)
         [Description("Maximum number of tasks to return. Default 50.")] int max = 50,
         CancellationToken ct = default) => await Run(async () =>
     {
-        var target = await ResolveListAsync(list, ct);
-        var tasks = await graph.GetTasksAsync(target.Id, include_completed, Math.Clamp(max, 1, 500), ct);
+        GraphTaskList target = await this.ResolveListAsync(list, ct);
+        List<GraphTask> tasks = await graph.GetTasksAsync(target.Id, include_completed, Math.Clamp(max, 1, 500), ct);
         return tasks.Select(t => TaskViews.ToView(t, target, clock)).ToList();
     });
 
@@ -61,18 +59,29 @@ public sealed class TodoTools(GraphTodoClient graph, TodoClock clock)
         [Description("Plain-text notes.")] string? notes = null,
         CancellationToken ct = default) => await Run(async () =>
     {
-        var target = await ResolveListAsync(list, ct);
-        var body = new Dictionary<string, object> { ["title"] = title };
-        if (due_date is not null) body["dueDateTime"] = clock.DueDate(TodoClock.ParseDate(due_date, nameof(due_date)));
+        GraphTaskList target = await this.ResolveListAsync(list, ct);
+        Dictionary<string, object> body = new Dictionary<string, object> { ["title"] = title };
+        if (due_date is not null)
+        {
+            body["dueDateTime"] = clock.DueDate(TodoClock.ParseDate(due_date, nameof(due_date)));
+        }
+
         if (reminder is not null)
         {
             body["reminderDateTime"] = clock.LocalDateTime(TodoClock.ParseLocalDateTime(reminder, nameof(reminder)));
             body["isReminderOn"] = true;
         }
-        if (importance is not null) body["importance"] = ParseImportance(importance);
-        if (notes is not null) body["body"] = new GraphItemBody { Content = notes, ContentType = "text" };
+        if (importance is not null)
+        {
+            body["importance"] = ParseImportance(importance);
+        }
 
-        var created = await graph.CreateTaskAsync(target.Id, body, ct);
+        if (notes is not null)
+        {
+            body["body"] = new GraphItemBody { Content = notes, ContentType = "text" };
+        }
+
+        GraphTask created = await graph.CreateTaskAsync(target.Id, body, ct);
         return TaskViews.ToView(created, target, clock);
     });
 
@@ -94,10 +103,21 @@ public sealed class TodoTools(GraphTodoClient graph, TodoClock clock)
         [Description("Turn the reminder off.")] bool clear_reminder = false,
         CancellationToken ct = default) => await Run(async () =>
     {
-        var patch = new Dictionary<string, object?>();
-        if (title is not null) patch["title"] = title;
-        if (clear_due_date) patch["dueDateTime"] = null;
-        else if (due_date is not null) patch["dueDateTime"] = clock.DueDate(TodoClock.ParseDate(due_date, nameof(due_date)));
+        Dictionary<string, object?> patch = new Dictionary<string, object?>();
+        if (title is not null)
+        {
+            patch["title"] = title;
+        }
+
+        if (clear_due_date)
+        {
+            patch["dueDateTime"] = null;
+        }
+        else if (due_date is not null)
+        {
+            patch["dueDateTime"] = clock.DueDate(TodoClock.ParseDate(due_date, nameof(due_date)));
+        }
+
         if (clear_reminder)
         {
             patch["isReminderOn"] = false;
@@ -108,13 +128,28 @@ public sealed class TodoTools(GraphTodoClient graph, TodoClock clock)
             patch["reminderDateTime"] = clock.LocalDateTime(TodoClock.ParseLocalDateTime(reminder, nameof(reminder)));
             patch["isReminderOn"] = true;
         }
-        if (importance is not null) patch["importance"] = ParseImportance(importance);
-        if (notes is not null) patch["body"] = new GraphItemBody { Content = notes, ContentType = "text" };
-        if (status is not null) patch["status"] = ParseStatus(status);
-        if (patch.Count == 0) throw new ArgumentException("Nothing to change: pass at least one field.");
+        if (importance is not null)
+        {
+            patch["importance"] = ParseImportance(importance);
+        }
 
-        var list = await ResolveListAsync(list_id, ct);
-        var updated = await graph.UpdateTaskAsync(list.Id, task_id, patch, ct);
+        if (notes is not null)
+        {
+            patch["body"] = new GraphItemBody { Content = notes, ContentType = "text" };
+        }
+
+        if (status is not null)
+        {
+            patch["status"] = ParseStatus(status);
+        }
+
+        if (patch.Count == 0)
+        {
+            throw new ArgumentException("Nothing to change: pass at least one field.");
+        }
+
+        GraphTaskList list = await this.ResolveListAsync(list_id, ct);
+        GraphTask updated = await graph.UpdateTaskAsync(list.Id, task_id, patch, ct);
         return TaskViews.ToView(updated, list, clock);
     });
 
@@ -125,8 +160,8 @@ public sealed class TodoTools(GraphTodoClient graph, TodoClock clock)
         [Description("The task id.")] string task_id,
         CancellationToken ct = default) => await Run(async () =>
     {
-        var list = await ResolveListAsync(list_id, ct);
-        var updated = await graph.UpdateTaskAsync(list.Id, task_id, new { status = "completed" }, ct);
+        GraphTaskList list = await this.ResolveListAsync(list_id, ct);
+        GraphTask updated = await graph.UpdateTaskAsync(list.Id, task_id, new { status = "completed" }, ct);
         return TaskViews.ToView(updated, list, clock);
     });
 
@@ -136,7 +171,7 @@ public sealed class TodoTools(GraphTodoClient graph, TodoClock clock)
         [Description("Name of the new list.")] string name,
         CancellationToken ct = default) => await Run(async () =>
     {
-        var created = await graph.CreateListAsync(name, ct);
+        GraphTaskList created = await graph.CreateListAsync(name, ct);
         return new ListView(created.Id, created.DisplayName, false, created.IsShared);
     });
 
@@ -144,11 +179,13 @@ public sealed class TodoTools(GraphTodoClient graph, TodoClock clock)
 
     private async Task<GraphTaskList> ResolveListAsync(string? nameOrId, CancellationToken ct)
     {
-        var lists = await graph.GetListsAsync(ct);
+        List<GraphTaskList> lists = await graph.GetListsAsync(ct);
         if (string.IsNullOrWhiteSpace(nameOrId))
+        {
             return lists.FirstOrDefault(l => l.WellknownListName == "defaultList")
                 ?? lists.FirstOrDefault()
                 ?? throw new McpException("No To Do lists found.");
+        }
 
         return lists.FirstOrDefault(l => l.Id == nameOrId)
             ?? lists.FirstOrDefault(l => string.Equals(l.DisplayName, nameOrId.Trim(), StringComparison.OrdinalIgnoreCase))

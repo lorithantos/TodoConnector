@@ -1,11 +1,9 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.Identity.Web;
 using TodoMcp;
 using TodoMcp.Auth;
-using TodoMcp.Todo;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<TodoMcpOptions>(builder.Configuration.GetSection(TodoMcpOptions.SectionName));
 
@@ -26,6 +24,7 @@ builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationH
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient(OAuthFacade.EntraHttpClient);
 builder.Services.AddHttpClient<GraphTodoClient>(c => c.BaseAddress = new Uri("https://graph.microsoft.com/v1.0/"));
+builder.Services.AddSingleton(TimeProvider.System); // the one place the real clock is named
 builder.Services.AddSingleton<TodoClock>();
 
 builder.Services
@@ -45,7 +44,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
     o.KnownProxies.Clear();
 });
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 app.UseForwardedHeaders();
 app.UseMcpChallengeHeader(); // adds resource_metadata to 401s so Claude can discover the OAuth endpoints

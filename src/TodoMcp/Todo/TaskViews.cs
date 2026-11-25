@@ -1,8 +1,12 @@
-using System.Globalization;
-
 namespace TodoMcp.Todo;
 
 // What the tools return to Claude: flat, local-time, easy to read.
+
+/// <summary>One open task and the list it came from: the agenda's input.</summary>
+public sealed record ListedTask(GraphTask Task, GraphTaskList List);
+
+/// <summary>A listed task with its due date already read in the user's time zone.</summary>
+internal sealed record DatedTask(GraphTask Task, GraphTaskList List, DateOnly? Due);
 
 public sealed record ListView(string Id, string Name, bool IsDefault, bool IsShared);
 
@@ -32,10 +36,10 @@ public static class TaskViews
 {
     public static TaskView ToView(GraphTask t, GraphTaskList list, TodoClock clock)
     {
-        var due = clock.ToLocal(t.DueDateTime);
-        var reminder = t.IsReminderOn ? clock.ToLocal(t.ReminderDateTime) : null;
-        var completed = clock.ToLocal(t.CompletedDateTime);
-        var notes = t.Body?.Content;
+        DateTime? due = clock.ToLocal(t.DueDateTime);
+        DateTime? reminder = t.IsReminderOn ? clock.ToLocal(t.ReminderDateTime) : null;
+        DateTime? completed = clock.ToLocal(t.CompletedDateTime);
+        string? notes = t.Body?.Content;
         return new TaskView(
             list.Id, list.DisplayName, t.Id, t.Title, t.Status, t.Importance,
             due?.ToString("yyyy-MM-dd ddd", CultureInfo.InvariantCulture),
@@ -46,28 +50,37 @@ public static class TaskViews
 
     /// <summary>Sorts open tasks into the buckets Claude nags about.</summary>
     public static AgendaView BuildAgenda(
-        IEnumerable<(GraphTask Task, GraphTaskList List)> tasks, TodoClock clock, int daysAhead)
+        IEnumerable<ListedTask> tasks, TodoClock clock, int daysAhead)
     {
-        var today = clock.Today;
-        var now = clock.LocalNow;
-        var horizon = today.AddDays(daysAhead);
-        var reminderHorizon = now.AddDays(daysAhead);
+        DateOnly today = clock.Today;
+        DateTime now = clock.LocalNow;
+        DateOnly horizon = today.AddDays(daysAhead);
+        DateTime reminderHorizon = now.AddDays(daysAhead);
 
         List<TaskView> overdue = [], dueToday = [], upcoming = [], reminders = [], important = [];
-        var ordered = tasks
+        IOrderedEnumerable<DatedTask> ordered = tasks
             .Where(x => !x.Task.IsCompleted)
-            .Select(x => (x.Task, x.List, Due: clock.ToLocal(x.Task.DueDateTime) is { } d ? DateOnly.FromDateTime(d) : (DateOnly?)null))
+            .Select(x => new DatedTask(x.Task, x.List, clock.ToLocal(x.Task.DueDateTime) is { } d ? DateOnly.FromDateTime(d) : null))
             .OrderBy(x => x.Due ?? DateOnly.MaxValue)
             .ThenByDescending(x => x.Task.Importance == "high");
 
-        foreach (var (task, list, due) in ordered)
+        foreach ((GraphTask task, GraphTaskList list, DateOnly? due) in ordered)
         {
-            var view = ToView(task, list, clock);
+            TaskView view = ToView(task, list, clock);
             if (due is { } d)
             {
-                if (d < today) overdue.Add(view);
-                else if (d == today) dueToday.Add(view);
-                else if (d <= horizon) upcoming.Add(view);
+                if (d < today)
+                {
+                    overdue.Add(view);
+                }
+                else if (d == today)
+                {
+                    dueToday.Add(view);
+                }
+                else if (d <= horizon)
+                {
+                    upcoming.Add(view);
+                }
             }
             else if (string.Equals(task.Importance, "high", StringComparison.OrdinalIgnoreCase))
             {
@@ -75,7 +88,9 @@ public static class TaskViews
             }
 
             if (task.IsReminderOn && clock.ToLocal(task.ReminderDateTime) is { } r && r >= now && r <= reminderHorizon)
+            {
                 reminders.Add(view);
+            }
         }
 
         return new AgendaView(

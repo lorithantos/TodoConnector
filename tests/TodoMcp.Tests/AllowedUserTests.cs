@@ -1,6 +1,3 @@
-using System.Security.Claims;
-using TodoMcp.Auth;
-
 namespace TodoMcp.Tests;
 
 public class AllowedUserTests

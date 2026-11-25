@@ -1,0 +1,25 @@
+<!-- Properties every project in the repo shares, stated once. Copied from CardImport,
+     the reference repo for the C# house rules (JanetHome note.csharp-house-rules).
+
+     GenerateDocumentationFile with CS1591 suppressed: a missing doc comment is fine,
+     a STALE one (a cref that no longer resolves, a <param> naming a gone argument) is
+     a warning. Without the doc file those warnings are never emitted at all.
+     It is also what lets IDE0005 (unnecessary using) run during a build.
+
+     EnforceCodeStyleInBuild turns the .editorconfig house rules into build errors, so
+     a `var`, a braceless `if`, a missing `this.` or a block-scoped namespace fails
+     dotnet_check rather than waiting for a reviewer. -->
+<Project>
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- The house-rule codes, named so a reader can see which rules are gates. -->
+    <WarningsAsErrors>$(WarningsAsErrors);IDE0005;IDE0008;IDE0009;IDE0011;IDE0161</WarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

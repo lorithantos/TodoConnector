@@ -1,5 +1,3 @@
-using TodoMcp.Todo;
-
 namespace TodoMcp.Tests;
 
 public class ClockAndAgendaTests
@@ -10,15 +8,15 @@ public class ClockAndAgendaTests
     [Fact]
     public void Due_date_stored_as_utc_midnight_local_reads_back_as_the_same_day()
     {
-        var clock = Make.Clock(Now);
-        var local = clock.ToLocal(new GraphDateTimeTimeZone { DateTime = "2026-11-25T08:00:00.0000000", TimeZone = "UTC" });
+        TodoClock clock = Make.Clock(Now);
+        DateTime? local = clock.ToLocal(new GraphDateTimeTimeZone { DateTime = "2026-11-25T08:00:00.0000000", TimeZone = "UTC" });
         Assert.Equal(new DateTime(2026, 11, 25, 0, 0, 0), local);
     }
 
     [Fact]
     public void Writes_due_dates_as_local_midnight_with_a_windows_zone_name()
     {
-        var due = Make.Clock(Now).DueDate(new DateOnly(2026, 12, 1));
+        GraphDateTimeTimeZone due = Make.Clock(Now).DueDate(new DateOnly(2026, 12, 1));
         Assert.Equal("2026-12-01T00:00:00", due.DateTime);
         Assert.Equal("Pacific Standard Time", due.TimeZone);
     }
@@ -26,7 +24,7 @@ public class ClockAndAgendaTests
     [Fact]
     public void Today_is_the_local_date_not_the_utc_date()
     {
-        var clock = Make.Clock(new DateTimeOffset(2026, 11, 25, 3, 0, 0, TimeSpan.Zero)); // 19:00 on the 24th in LA
+        TodoClock clock = Make.Clock(new DateTimeOffset(2026, 11, 25, 3, 0, 0, TimeSpan.Zero)); // 19:00 on the 24th in LA
         Assert.Equal(new DateOnly(2026, 11, 24), clock.Today);
     }
 
@@ -43,8 +41,8 @@ public class ClockAndAgendaTests
     [Fact]
     public void Agenda_sorts_tasks_into_buckets()
     {
-        var clock = Make.Clock(Now);
-        var tasks = new[]
+        TodoClock clock = Make.Clock(Now);
+        IEnumerable<ListedTask> tasks = new[]
         {
             Make.Task("overdue", dueUtc: "2026-11-20T08:00:00"),
             Make.Task("today", dueUtc: "2026-11-24T08:00:00"),
@@ -53,9 +51,9 @@ public class ClockAndAgendaTests
             Make.Task("done", dueUtc: "2026-11-20T08:00:00", status: "completed"),
             Make.Task("important", importance: "high"),
             Make.Task("ping", reminderUtc: "2026-11-25T17:00:00"),
-        }.Select(t => (t, Make.List));
+        }.Select(t => new ListedTask(t, Make.List));
 
-        var agenda = TaskViews.BuildAgenda(tasks, clock, daysAhead: 7);
+        AgendaView agenda = TaskViews.BuildAgenda(tasks, clock, daysAhead: 7);
 
         Assert.Equal(["overdue"], agenda.Overdue.Select(t => t.Title));
         Assert.Equal(["today"], agenda.DueToday.Select(t => t.Title));

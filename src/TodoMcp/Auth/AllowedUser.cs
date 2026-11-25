@@ -1,7 +1,4 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.Extensions.Options;
-using Microsoft.Identity.Web;
 
 namespace TodoMcp.Auth;
 
@@ -14,9 +11,9 @@ public sealed class AllowedUserCheck(IOptionsMonitor<TodoMcpOptions> options)
 
     public bool IsAllowed(ClaimsPrincipal user)
     {
-        var allowed = options.CurrentValue.AllowedUsers;
-        var oid = user.GetObjectId();
-        var name = user.FindFirstValue("preferred_username") ?? user.FindFirstValue(ClaimTypes.Upn);
+        List<string> allowed = options.CurrentValue.AllowedUsers;
+        string? oid = user.GetObjectId();
+        string? name = user.FindFirstValue("preferred_username") ?? user.FindFirstValue(ClaimTypes.Upn);
         return allowed.Any(a =>
             (oid is not null && string.Equals(a, oid, StringComparison.OrdinalIgnoreCase)) ||
             (name is not null && string.Equals(a, name, StringComparison.OrdinalIgnoreCase)));
@@ -29,7 +26,9 @@ public sealed class AllowedUserHandler(AllowedUserCheck check, ILogger<AllowedUs
     protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, AllowedUserRequirement requirement)
     {
         if (context.User.Identity?.IsAuthenticated != true)
+        {
             return Task.CompletedTask;
+        }
 
         if (check.IsAllowed(context.User))
         {

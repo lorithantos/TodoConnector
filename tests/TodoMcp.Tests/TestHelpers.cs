@@ -1,6 +1,3 @@
-using Microsoft.Extensions.Options;
-using TodoMcp.Todo;
-
 namespace TodoMcp.Tests;
 
 internal sealed class FixedTime(DateTimeOffset utcNow) : TimeProvider

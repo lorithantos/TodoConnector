@@ -1,6 +1,3 @@
-using System.Text.Json;
-using Microsoft.Extensions.Options;
-
 namespace TodoMcp.Auth;
 
 /// <summary>
@@ -42,7 +39,7 @@ public static class OAuthFacade
                 if (ctx.Response.StatusCode == StatusCodes.Status401Unauthorized &&
                     ctx.Request.Path.StartsWithSegments("/mcp"))
                 {
-                    var baseUrl = BaseUrl(ctx);
+                    string baseUrl = BaseUrl(ctx);
                     ctx.Response.Headers.WWWAuthenticate =
                         $"Bearer resource_metadata=\"{baseUrl}/.well-known/oauth-protected-resource/mcp\"";
                 }
@@ -55,7 +52,7 @@ public static class OAuthFacade
 
     private static IResult ProtectedResourceMetadata(HttpContext ctx)
     {
-        var baseUrl = BaseUrl(ctx);
+        string baseUrl = BaseUrl(ctx);
         return Results.Json(new Dictionary<string, object>
         {
             ["resource"] = $"{baseUrl}/mcp",
@@ -67,7 +64,7 @@ public static class OAuthFacade
 
     private static IResult AuthorizationServerMetadata(HttpContext ctx)
     {
-        var baseUrl = BaseUrl(ctx);
+        string baseUrl = BaseUrl(ctx);
         return Results.Json(new Dictionary<string, object>
         {
             ["issuer"] = baseUrl,
@@ -84,27 +81,29 @@ public static class OAuthFacade
 
     // ---- dynamic client registration (RFC 7591) ------------------------------------------
 
-    private static async Task<IResult> Register(HttpContext ctx, IOptionsMonitor<TodoMcpOptions> options)
+    private static async Task<IResult> Register(HttpContext ctx, IOptionsMonitor<TodoMcpOptions> options, TimeProvider time)
     {
         JsonElement body;
         try { body = await JsonSerializer.DeserializeAsync<JsonElement>(ctx.Request.Body); }
         catch (JsonException) { return OAuthError("invalid_client_metadata", "Body must be JSON."); }
 
-        var redirectUris = body.TryGetProperty("redirect_uris", out var r) && r.ValueKind == JsonValueKind.Array
+        string[] redirectUris = body.TryGetProperty("redirect_uris", out JsonElement r) && r.ValueKind == JsonValueKind.Array
             ? r.EnumerateArray().Select(e => e.GetString() ?? "").ToArray()
             : [];
         if (redirectUris.Length == 0 || !redirectUris.All(u => IsAllowedRedirect(u, options.CurrentValue)))
+        {
             return OAuthError("invalid_redirect_uri", "Only Claude's OAuth callback URLs are accepted.");
+        }
 
         return Results.Json(new Dictionary<string, object>
         {
             ["client_id"] = PublicClientId,
-            ["client_id_issued_at"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            ["client_id_issued_at"] = time.GetUtcNow().ToUnixTimeSeconds(),
             ["redirect_uris"] = redirectUris,
             ["token_endpoint_auth_method"] = "none",
             ["grant_types"] = new[] { "authorization_code", "refresh_token" },
             ["response_types"] = new[] { "code" },
-            ["client_name"] = body.TryGetProperty("client_name", out var n) ? n.GetString() ?? "Claude" : "Claude",
+            ["client_name"] = body.TryGetProperty("client_name", out JsonElement n) ? n.GetString() ?? "Claude" : "Claude",
         }, statusCode: StatusCodes.Status201Created);
     }
 
@@ -112,23 +111,31 @@ public static class OAuthFacade
 
     private static IResult Authorize(HttpContext ctx, IConfiguration config, IOptionsMonitor<TodoMcpOptions> options)
     {
-        var q = ctx.Request.Query;
-        var redirectUri = q["redirect_uri"].ToString();
+        IQueryCollection q = ctx.Request.Query;
+        string redirectUri = q["redirect_uri"].ToString();
         if (!IsAllowedRedirect(redirectUri, options.CurrentValue))
+        {
             return Results.BadRequest("redirect_uri is not allowed.");
-        if (q["response_type"] != "code")
-            return Results.BadRequest("Only response_type=code is supported.");
-        if (string.IsNullOrEmpty(q["code_challenge"]) || q["code_challenge_method"] != "S256")
-            return Results.BadRequest("PKCE with S256 is required.");
+        }
 
-        var entra = EntraSettings.From(config);
-        var url = BuildEntraAuthorizeUrl(entra, redirectUri, q["state"].ToString(), q["code_challenge"].ToString());
+        if (q["response_type"] != "code")
+        {
+            return Results.BadRequest("Only response_type=code is supported.");
+        }
+
+        if (string.IsNullOrEmpty(q["code_challenge"]) || q["code_challenge_method"] != "S256")
+        {
+            return Results.BadRequest("PKCE with S256 is required.");
+        }
+
+        EntraSettings entra = EntraSettings.From(config);
+        string url = BuildEntraAuthorizeUrl(entra, redirectUri, q["state"].ToString(), q["code_challenge"].ToString());
         return Results.Redirect(url);
     }
 
     public static string BuildEntraAuthorizeUrl(EntraSettings entra, string redirectUri, string state, string codeChallenge)
     {
-        var p = new Dictionary<string, string?>
+        Dictionary<string, string?> p = new Dictionary<string, string?>
         {
             ["client_id"] = entra.ClientId,
             ["response_type"] = "code",
@@ -147,10 +154,10 @@ public static class OAuthFacade
     private static async Task Token(HttpContext ctx, IConfiguration config, IHttpClientFactory http,
         IOptionsMonitor<TodoMcpOptions> options, ILoggerFactory loggers)
     {
-        var form = await ctx.Request.ReadFormAsync();
-        var entra = EntraSettings.From(config);
+        IFormCollection form = await ctx.Request.ReadFormAsync();
+        EntraSettings entra = EntraSettings.From(config);
 
-        var upstream = BuildEntraTokenForm(form.ToDictionary(kv => kv.Key, kv => kv.Value.ToString()), entra, options.CurrentValue, out var error);
+        Dictionary<string, string>? upstream = BuildEntraTokenForm(form.ToDictionary(kv => kv.Key, kv => kv.Value.ToString()), entra, options.CurrentValue, out string? error);
         ctx.Response.Headers.CacheControl = "no-store";
         if (upstream is null)
         {
@@ -158,11 +165,13 @@ public static class OAuthFacade
             return;
         }
 
-        using var response = await http.CreateClient(EntraHttpClient).PostAsync(
+        using HttpResponseMessage response = await http.CreateClient(EntraHttpClient).PostAsync(
             $"{entra.AuthorityUrl}/oauth2/v2.0/token", new FormUrlEncodedContent(upstream), ctx.RequestAborted);
-        var body = await response.Content.ReadAsStringAsync(ctx.RequestAborted);
+        string body = await response.Content.ReadAsStringAsync(ctx.RequestAborted);
         if (!response.IsSuccessStatusCode)
+        {
             loggers.CreateLogger(typeof(OAuthFacade)).LogWarning("Entra token endpoint returned {Status}: {Body}", (int)response.StatusCode, body);
+        }
 
         ctx.Response.StatusCode = (int)response.StatusCode;
         ctx.Response.ContentType = "application/json";
@@ -174,8 +183,8 @@ public static class OAuthFacade
         IReadOnlyDictionary<string, string> incoming, EntraSettings entra, TodoMcpOptions options, out string? error)
     {
         error = null;
-        incoming.TryGetValue("grant_type", out var grantType);
-        var form = new Dictionary<string, string>
+        incoming.TryGetValue("grant_type", out string? grantType);
+        Dictionary<string, string> form = new Dictionary<string, string>
         {
             ["client_id"] = entra.ClientId,
             ["client_secret"] = entra.ClientSecret,
@@ -186,9 +195,9 @@ public static class OAuthFacade
         switch (grantType)
         {
             case "authorization_code":
-                if (!incoming.TryGetValue("code", out var code) || string.IsNullOrEmpty(code) ||
-                    !incoming.TryGetValue("code_verifier", out var verifier) || string.IsNullOrEmpty(verifier) ||
-                    !incoming.TryGetValue("redirect_uri", out var redirect) || !IsAllowedRedirect(redirect, options))
+                if (!incoming.TryGetValue("code", out string? code) || string.IsNullOrEmpty(code) ||
+                    !incoming.TryGetValue("code_verifier", out string? verifier) || string.IsNullOrEmpty(verifier) ||
+                    !incoming.TryGetValue("redirect_uri", out string? redirect) || !IsAllowedRedirect(redirect, options))
                 {
                     error = "code, code_verifier and an allowed redirect_uri are required.";
                     return null;
@@ -199,7 +208,7 @@ public static class OAuthFacade
                 return form;
 
             case "refresh_token":
-                if (!incoming.TryGetValue("refresh_token", out var refresh) || string.IsNullOrEmpty(refresh))
+                if (!incoming.TryGetValue("refresh_token", out string? refresh) || string.IsNullOrEmpty(refresh))
                 {
                     error = "refresh_token is required.";
                     return null;
@@ -221,7 +230,7 @@ public static class OAuthFacade
 
     public static string BaseUrl(HttpContext ctx)
     {
-        var configured = ctx.RequestServices.GetRequiredService<IOptionsMonitor<TodoMcpOptions>>().CurrentValue.PublicBaseUrl;
+        string? configured = ctx.RequestServices.GetRequiredService<IOptionsMonitor<TodoMcpOptions>>().CurrentValue.PublicBaseUrl;
         return !string.IsNullOrWhiteSpace(configured)
             ? configured.TrimEnd('/')
             : $"{ctx.Request.Scheme}://{ctx.Request.Host}{ctx.Request.PathBase}".TrimEnd('/');
@@ -235,17 +244,17 @@ public static class OAuthFacade
 /// <summary>The Entra app registration, read from the AzureAd section.</summary>
 public sealed record EntraSettings(string Instance, string TenantId, string ClientId, string ClientSecret)
 {
-    public string AuthorityUrl => $"{Instance.TrimEnd('/')}/{TenantId}";
+    public string AuthorityUrl => $"{this.Instance.TrimEnd('/')}/{this.TenantId}";
 
     /// <summary>
     /// "/.default" on our own API gives a token for this app and, in the same consent prompt, the
     /// Graph permissions configured on the registration (Tasks.ReadWrite), which on-behalf-of needs.
     /// </summary>
-    public string Scope => $"openid offline_access api://{ClientId}/.default";
+    public string Scope => $"openid offline_access api://{this.ClientId}/.default";
 
     public static EntraSettings From(IConfiguration config)
     {
-        var s = config.GetSection("AzureAd");
+        IConfigurationSection s = config.GetSection("AzureAd");
         return new EntraSettings(
             s["Instance"] ?? "https://login.microsoftonline.com/",
             s["TenantId"] ?? "common",
