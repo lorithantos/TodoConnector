@@ -173,11 +173,41 @@ if ($Stage -eq 'App') {
         Write-Host 'Scope access_as_user already exists; leaving it alone.'
     }
 
-    Step 'Microsoft Graph delegated permissions: Tasks.ReadWrite, User.Read, offline_access'
-    $scopes = Az ad sp show --id $graphAppId --query 'oauth2PermissionScopes[].{v:value,id:id}' -o json | ConvertFrom-Json
-    foreach ($name in 'Tasks.ReadWrite', 'User.Read', 'offline_access') {
-        $id = ($scopes | Where-Object v -eq $name).id
-        Az ad app permission add --id $appId --api $graphAppId --api-permissions "$id=Scope" 2>$null | Out-Null
+    # The required permissions, stated whole and written only when they differ. Two entries:
+    #   - Microsoft Graph, delegated: Tasks.ReadWrite, User.Read, offline_access (on-behalf-of needs them).
+    #   - The app's OWN access_as_user scope. The facade asks Entra for api://<appId>/.default, and
+    #     for a personal Microsoft account Entra refuses that (invalid_scope: "it refers to a resource
+    #     which is not listed in the client's Required Resource Access") unless the app lists itself
+    #     -- seen live 2026-11-25 through /oauth/callback. With it, one consent covers both.
+    # Written whole because 'az ad app permission add' appends without checking: three earlier runs
+    # left every Graph permission listed three times.
+    Step 'Required permissions: Graph Tasks.ReadWrite, User.Read, offline_access + its own access_as_user'
+    $graphScopes = Az ad sp show --id $graphAppId --query 'oauth2PermissionScopes[].{v:value,id:id}' -o json | ConvertFrom-Json
+    $graphIds = @('Tasks.ReadWrite', 'User.Read', 'offline_access' | ForEach-Object {
+        $name = $_
+        $id = ($graphScopes | Where-Object v -eq $name).id
+        if (-not $id) { throw "Microsoft Graph has no delegated scope named $name." }
+        $id
+    })
+    $ownScopeId = Az ad app show --id $appId --query "api.oauth2PermissionScopes[?value=='access_as_user'].id | [0]" -o tsv
+    if (-not $ownScopeId) { throw 'The app has no access_as_user scope; the step above should have created it.' }
+    $wanted = @(
+        @{ resourceAppId = $graphAppId; resourceAccess = @($graphIds | ForEach-Object { @{ id = $_; type = 'Scope' } }) }
+        @{ resourceAppId = $appId; resourceAccess = @(@{ id = $ownScopeId; type = 'Scope' }) }
+    )
+    # Compare as sorted "resource/id" keys, so order and duplicates both count as a difference.
+    $current = @(Az ad app show --id $appId --query 'requiredResourceAccess' -o json | ConvertFrom-Json)
+    $currentKeys = @($current | ForEach-Object { $r = $_.resourceAppId; $_.resourceAccess | ForEach-Object { "$r/$($_.id)/$($_.type)" } }) | Sort-Object
+    $wantedKeys = @($wanted | ForEach-Object { $r = $_.resourceAppId; $_.resourceAccess | ForEach-Object { "$r/$($_.id)/$($_.type)" } }) | Sort-Object
+    if (($currentKeys -join ';') -cne ($wantedKeys -join ';')) {
+        $tmp = New-TemporaryFile; Set-Content $tmp (@{ requiredResourceAccess = $wanted } | ConvertTo-Json -Depth 6 -Compress)
+        try {
+            Az rest --method PATCH --uri "https://graph.microsoft.com/v1.0/applications/$objectId" `
+                --headers 'Content-Type=application/json' --body "@$tmp" | Out-Null
+        } finally { Remove-Item $tmp }
+        Write-Host "Required permissions were $($currentKeys.Count) entries; now exactly $($wantedKeys.Count)."
+    } else {
+        Write-Host 'Required permissions already exact.'
     }
 
     $secrets = @(Az ad app credential list --id $appId --query '[].displayName' -o json | ConvertFrom-Json)
