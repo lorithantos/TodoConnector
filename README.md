@@ -140,7 +140,14 @@ zip to `LtTodoConnector` (production; there is no staging slot) with classic zip
 until it answers 200. A 200 proves an app is running, not which build, and the stamp and the
 restart each recycle the site, so one 200 can come from a process that is then replaced:
 probe again a minute later, and check `LATEST_BUILD_INFO` and the wwwroot file times rather
-than the deployment status.
+than the deployment status. Seen on 2026-11-25: the orchestrator reported healthy, and the next
+two probes answered 503 before the second restart settled.
+
+A deploy that adds or renames tools is not visible in a Claude chat that already exists: a chat
+keeps the tool list it started with, even after the connector is reconnected, while the server's
+instructions are fetched afresh (so the old chat reads about tools it cannot call). Start a new
+chat. Seen on 2026-11-25 with the delete, move and step tools: the server served all 14 tools
+and the old chat showed 7.
 
 ## Local development
 
