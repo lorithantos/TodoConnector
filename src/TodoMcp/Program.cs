@@ -26,6 +26,9 @@ builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationH
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient(OAuthFacade.EntraHttpClient);
+// The token relay's credential, decided from the same AzureAd section the on-behalf-of path reads.
+builder.Services.AddSingleton(sp => EntraClientCredential.From(sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddSingleton<IClientAssertionSource, ManagedIdentityAssertionSource>();
 builder.Services.AddHttpClient<GraphTodoClient>(c => c.BaseAddress = new Uri("https://graph.microsoft.com/v1.0/"));
 builder.Services.AddSingleton(TimeProvider.System); // the one place the real clock is named
 builder.Services.AddSingleton<TodoClock>();
@@ -48,6 +51,10 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 });
 
 WebApplication app = builder.Build();
+
+// Resolved now, so an app with neither a managed identity nor a secret stops here, naming both settings,
+// instead of at its first token relay.
+_ = app.Services.GetRequiredService<EntraClientCredential>();
 
 app.UseForwardedHeaders();
 app.UseMcpChallengeHeader(); // adds resource_metadata to 401s so Claude can discover the OAuth endpoints

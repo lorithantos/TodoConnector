@@ -90,10 +90,12 @@ public class FacadeTests(FacadeTests.Factory factory) : IClassFixture<FacadeTest
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    private static readonly IReadOnlyDictionary<string, string> Secret = new Dictionary<string, string> { ["client_secret"] = "secret" };
+
     [Fact]
     public void Token_form_adds_the_secret_and_drops_resource_and_client_credentials()
     {
-        EntraSettings entra = new EntraSettings("https://login.microsoftonline.com/", "common", "cid", "secret");
+        EntraSettings entra = new EntraSettings("https://login.microsoftonline.com/", "common", "cid");
         Dictionary<string, string>? form = OAuthFacade.BuildEntraTokenForm(new Dictionary<string, string>
         {
             ["grant_type"] = "authorization_code",
@@ -102,7 +104,7 @@ public class FacadeTests(FacadeTests.Factory factory) : IClassFixture<FacadeTest
             ["redirect_uri"] = Callback,
             ["resource"] = "https://todo.example.net/mcp",
             ["client_id"] = OAuthFacade.PublicClientId,
-        }, entra, new TodoMcpOptions(), out string? error);
+        }, entra, Secret, new TodoMcpOptions(), out string? error);
 
         Assert.Null(error);
         Assert.Equal("cid", form!["client_id"]);
@@ -111,10 +113,31 @@ public class FacadeTests(FacadeTests.Factory factory) : IClassFixture<FacadeTest
     }
 
     [Fact]
+    public void Token_form_adds_an_assertion_credential_and_no_secret()
+    {
+        EntraSettings entra = new EntraSettings("https://login.microsoftonline.com/", "common", "cid");
+        Dictionary<string, string>? form = OAuthFacade.BuildEntraTokenForm(new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = "r1",
+            ["client_secret"] = "sent-by-the-client",
+        }, entra, new Dictionary<string, string>
+        {
+            ["client_assertion_type"] = EntraManagedIdentityCredential.JwtBearerAssertionType,
+            ["client_assertion"] = "mi-assertion",
+        }, new TodoMcpOptions(), out string? error);
+
+        Assert.Null(error);
+        Assert.Equal(EntraManagedIdentityCredential.JwtBearerAssertionType, form!["client_assertion_type"]);
+        Assert.Equal("mi-assertion", form["client_assertion"]);
+        Assert.False(form.ContainsKey("client_secret"));
+    }
+
+    [Fact]
     public void Token_form_rejects_other_grant_types()
     {
-        EntraSettings entra = new EntraSettings("https://login.microsoftonline.com/", "common", "cid", "secret");
+        EntraSettings entra = new EntraSettings("https://login.microsoftonline.com/", "common", "cid");
         Assert.Null(OAuthFacade.BuildEntraTokenForm(
-            new Dictionary<string, string> { ["grant_type"] = "client_credentials" }, entra, new TodoMcpOptions(), out _));
+            new Dictionary<string, string> { ["grant_type"] = "client_credentials" }, entra, Secret, new TodoMcpOptions(), out _));
     }
 }

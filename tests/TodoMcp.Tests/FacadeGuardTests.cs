@@ -8,7 +8,9 @@ public class FacadeGuardTests(FacadeTests.Factory factory) : IClassFixture<Facad
 {
     private const string Callback = "https://claude.ai/api/mcp/auth_callback";
 
-    private static readonly EntraSettings Entra = new EntraSettings("https://login.microsoftonline.com/", "common", "cid", "secret");
+    private static readonly EntraSettings Entra = new EntraSettings("https://login.microsoftonline.com/", "common", "cid");
+
+    private static readonly IReadOnlyDictionary<string, string> Secret = new Dictionary<string, string> { ["client_secret"] = "secret" };
 
     private async Task<HttpResponseMessage> Authorize(string query)
     {
@@ -46,7 +48,7 @@ public class FacadeGuardTests(FacadeTests.Factory factory) : IClassFixture<Facad
             ["code"] = "c",
             ["code_verifier"] = "v",
             ["redirect_uri"] = "https://evil.example/cb",
-        }, Entra, new TodoMcpOptions(), out string? error);
+        }, Entra, Secret, new TodoMcpOptions(), out string? error);
 
         Assert.Null(form);
         Assert.Contains("redirect_uri", error);
@@ -60,7 +62,7 @@ public class FacadeGuardTests(FacadeTests.Factory factory) : IClassFixture<Facad
             ["grant_type"] = "refresh_token",
             ["refresh_token"] = "r1",
             ["client_id"] = OAuthFacade.PublicClientId,
-        }, Entra, new TodoMcpOptions(), out string? error);
+        }, Entra, Secret, new TodoMcpOptions(), out string? error);
 
         Assert.Null(error);
         Assert.Equal("refresh_token", form!["grant_type"]);
@@ -80,7 +82,7 @@ public class FacadeGuardTests(FacadeTests.Factory factory) : IClassFixture<Facad
             incoming["refresh_token"] = refreshToken;
         }
 
-        Dictionary<string, string>? form = OAuthFacade.BuildEntraTokenForm(incoming, Entra, new TodoMcpOptions(), out string? error);
+        Dictionary<string, string>? form = OAuthFacade.BuildEntraTokenForm(incoming, Entra, Secret, new TodoMcpOptions(), out string? error);
 
         Assert.Null(form);
         Assert.Equal("refresh_token is required.", error);

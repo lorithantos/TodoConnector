@@ -9,7 +9,7 @@ namespace TodoMcp.Auth;
 /// Claude straight at Entra fails. The facade:
 ///   * answers dynamic registration with a fixed public client id (Claude never sees a secret),
 ///   * redirects /oauth/authorize to Entra with the real client id and a fixed scope, dropping "resource",
-///   * relays /oauth/token to Entra, adding the client secret.
+///   * relays /oauth/token to Entra, adding the app's client credential (see EntraClientCredential).
 /// It stores nothing. Entra still does the sign-in, consent, PKCE check and token issuing,
 /// and Entra only redirects to the reply URLs registered on the app.
 /// </summary>
@@ -149,15 +149,17 @@ public static class OAuthFacade
         return Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString($"{entra.AuthorityUrl}/oauth2/v2.0/authorize", p);
     }
 
-    // ---- token: relay to Entra with the client secret -------------------------------------
+    // ---- token: relay to Entra with the app's client credential ---------------------------
 
     private static async Task Token(HttpContext ctx, IConfiguration config, IHttpClientFactory http,
-        IOptionsMonitor<TodoMcpOptions> options, ILoggerFactory loggers)
+        IOptionsMonitor<TodoMcpOptions> options, ILoggerFactory loggers,
+        EntraClientCredential credential, IClientAssertionSource assertions)
     {
         IFormCollection form = await ctx.Request.ReadFormAsync();
         EntraSettings entra = EntraSettings.From(config);
+        IReadOnlyDictionary<string, string> credentialFields = await credential.FormFieldsAsync(assertions, entra, ctx.RequestAborted);
 
-        Dictionary<string, string>? upstream = BuildEntraTokenForm(form.ToDictionary(kv => kv.Key, kv => kv.Value.ToString()), entra, options.CurrentValue, out string? error);
+        Dictionary<string, string>? upstream = BuildEntraTokenForm(form.ToDictionary(kv => kv.Key, kv => kv.Value.ToString()), entra, credentialFields, options.CurrentValue, out string? error);
         ctx.Response.Headers.CacheControl = "no-store";
         if (upstream is null)
         {
@@ -178,19 +180,26 @@ public static class OAuthFacade
         await ctx.Response.WriteAsync(body, ctx.RequestAborted);
     }
 
-    /// <summary>Builds the form sent to Entra's token endpoint, or null with an error message.</summary>
+    /// <summary>
+    /// Builds the form sent to Entra's token endpoint, or null with an error message.
+    /// <paramref name="credential"/> is the app's credential as form fields (EntraClientCredential.FormFieldsAsync).
+    /// </summary>
     public static Dictionary<string, string>? BuildEntraTokenForm(
-        IReadOnlyDictionary<string, string> incoming, EntraSettings entra, TodoMcpOptions options, out string? error)
+        IReadOnlyDictionary<string, string> incoming, EntraSettings entra, IReadOnlyDictionary<string, string> credential,
+        TodoMcpOptions options, out string? error)
     {
         error = null;
         incoming.TryGetValue("grant_type", out string? grantType);
         Dictionary<string, string> form = new Dictionary<string, string>
         {
             ["client_id"] = entra.ClientId,
-            ["client_secret"] = entra.ClientSecret,
             ["scope"] = entra.Scope,
             ["grant_type"] = grantType ?? "",
         };
+        foreach (KeyValuePair<string, string> field in credential)
+        {
+            form[field.Key] = field.Value;
+        }
 
         switch (grantType)
         {
@@ -241,8 +250,8 @@ public static class OAuthFacade
             statusCode: StatusCodes.Status400BadRequest);
 }
 
-/// <summary>The Entra app registration, read from the AzureAd section.</summary>
-public sealed record EntraSettings(string Instance, string TenantId, string ClientId, string ClientSecret)
+/// <summary>The Entra app registration, read from the AzureAd section. Its credential is EntraClientCredential.</summary>
+public sealed record EntraSettings(string Instance, string TenantId, string ClientId)
 {
     public string AuthorityUrl => $"{this.Instance.TrimEnd('/')}/{this.TenantId}";
 
@@ -258,7 +267,6 @@ public sealed record EntraSettings(string Instance, string TenantId, string Clie
         return new EntraSettings(
             s["Instance"] ?? "https://login.microsoftonline.com/",
             s["TenantId"] ?? "common",
-            s["ClientId"] ?? throw new InvalidOperationException("AzureAd:ClientId is not set."),
-            s["ClientSecret"] ?? throw new InvalidOperationException("AzureAd:ClientSecret is not set."));
+            s["ClientId"] ?? throw new InvalidOperationException("AzureAd:ClientId is not set."));
     }
 }

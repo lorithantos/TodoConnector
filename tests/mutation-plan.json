@@ -55,6 +55,27 @@
     { "name": "B10 tools: Graph errors not translated", "path": "src/TodoMcp/Tools/TodoTools.cs",
       "find": "catch (GraphRequestException e) { throw new McpException(e.Message); }", "replace": "catch (GraphRequestException) { throw; }" },
     { "name": "B11 tools: importance not validated", "path": "src/TodoMcp/Tools/TodoTools.cs",
-      "find": "_ => throw new ArgumentException(\"importance must be low, normal or high.\"),", "replace": "_ => value," }
+      "find": "_ => throw new ArgumentException(\"importance must be low, normal or high.\"),", "replace": "_ => value," },
+
+    { "name": "MI relay: assertion sent as client_secret", "path": "src/TodoMcp/Auth/EntraClientCredential.cs",
+      "find": "[\"client_assertion\"] = assertion,", "replace": "[\"client_secret\"] = assertion," },
+    { "name": "MI relay: assertion type not sent", "path": "src/TodoMcp/Auth/EntraClientCredential.cs",
+      "find": "[\"client_assertion_type\"] = JwtBearerAssertionType,", "replace": "[\"client_assertion_typ\"] = JwtBearerAssertionType," },
+    { "name": "MI relay: client_secret sent alongside the credential", "path": "src/TodoMcp/Auth/OAuthFacade.cs",
+      "find": "            [\"grant_type\"] = grantType ?? \"\",", "replace": "            [\"grant_type\"] = grantType ?? \"\",\n            [\"client_secret\"] = \"leaked\"," },
+    { "name": "credential: managed identity entry ignored", "path": "src/TodoMcp/Auth/EntraClientCredential.cs",
+      "find": "credentials[0].SourceType == Microsoft.Identity.Abstractions.CredentialSource.SignedAssertionFromManagedIdentity)", "replace": "credentials[0].SourceType != Microsoft.Identity.Abstractions.CredentialSource.SignedAssertionFromManagedIdentity)" },
+    { "name": "credential: a secret beats the managed identity", "path": "src/TodoMcp/Auth/EntraClientCredential.cs",
+      "find": "if (credentials.Length > 0 &&", "replace": "if (string.IsNullOrWhiteSpace(azureAd[\"ClientSecret\"]) && credentials.Length > 0 &&" },
+    { "name": "secret relay: secret sent under the wrong name", "path": "src/TodoMcp/Auth/EntraClientCredential.cs",
+      "find": "[\"client_secret\"] = this.secret", "replace": "[\"client_secrt\"] = this.secret" },
+    { "name": "secret relay: an assertion sent too", "path": "src/TodoMcp/Auth/EntraClientCredential.cs",
+      "find": "{ [\"client_secret\"] = this.secret }", "replace": "{ [\"client_secret\"] = this.secret, [\"client_assertion\"] = \"x\" }" },
+    { "name": "facade: credential fields not copied into the token form", "path": "src/TodoMcp/Auth/OAuthFacade.cs",
+      "find": "form[field.Key] = field.Value;", "replace": "_ = field;" },
+    { "name": "startup: credential not resolved at startup", "path": "src/TodoMcp/Program.cs",
+      "find": "_ = app.Services.GetRequiredService<EntraClientCredential>();", "replace": "" },
+    { "name": "startup: missing-credential error does not name AzureAd:ClientSecret", "path": "src/TodoMcp/Auth/EntraClientCredential.cs",
+      "find": "or set {ClientSecretSetting}.", "replace": "or set a secret." }
   ]
 }

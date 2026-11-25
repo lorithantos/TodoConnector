@@ -1,0 +1,19 @@
+{
+  "name": "TodoConnector",
+  "identity": {
+    "source": "git",
+    "sink": { "type": "azureAppSetting", "setting": "LATEST_BUILD_INFO" }
+  },
+  "stages": {
+    "build": { "run": "dotnet build TodoMcp.slnx --configuration Release" },
+    "package": { "run": "dotnet publish src\\TodoMcp\\TodoMcp.csproj -c Release -o {packageDir}", "zip": true },
+    "push": { "type": "azureWebAppZip", "app": "LtTodoConnector", "resourceGroup": "Lori_Photography" }
+  },
+  "verify": {
+    "url": "https://lttodoconnector.azurewebsites.net/healthz",
+    "warmingStatuses": [503],
+    "attempts": 30,
+    "delaySeconds": 6,
+    "initialDelaySeconds": 15
+  }
+}
