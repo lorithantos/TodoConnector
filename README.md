@@ -11,13 +11,22 @@ Entra app registration. Works with a personal Microsoft account or a work/school
 | `get_agenda` | The nag list: overdue, due today, due soon, upcoming reminders, important with no date. Includes today's date and time. |
 | `list_task_lists` | Your lists. |
 | `list_tasks` | Tasks in one list (by name or id). |
-| `create_task` | Adds a task with optional due date, reminder, importance, notes. |
-| `update_task` | Changes any of those, clears due date or reminder, or reopens a task. |
+| `get_task` | One task with its steps and their ids. |
+| `create_task` | Adds a task with optional due date, reminder, importance, notes, and repeat (daily, weekdays, weekly on chosen days, monthly, yearly, every N). A repeating task with no due date is due today. |
+| `update_task` | Changes any of those, clears due date, reminder or repeat, or reopens a task. |
 | `complete_task` | Marks a task done. |
+| `add_step` / `update_step` / `delete_step` | A task's steps (checklist items): add, rename or tick off, remove. |
 | `create_task_list` | Makes a new list. |
+| `rename_task_list` | Renames a list. The built-in Tasks and Flagged email lists are refused. |
+| `delete_task` | Deletes a task. Destructive. |
+| `delete_task_list` | Deletes a list and its tasks. Destructive. The built-in lists are refused. |
+| `move_task` | Moves a task and its steps to another list: a copy, then a delete of the original only once the copy is complete. Destructive. |
 
-There is deliberately no delete tool. The server also sends Claude instructions to check the
-agenda early in a conversation and bring up anything overdue.
+The destructive tools carry MCP's destructive annotation, and the server's instructions tell Claude
+to confirm them with you, naming the task or list, unless you named it yourself in the same
+request; and to change a task by updating it, not by deleting and recreating it. The server also
+sends Claude instructions to check the agenda early in a conversation and bring up anything
+overdue.
 
 ## How sign-in works
 

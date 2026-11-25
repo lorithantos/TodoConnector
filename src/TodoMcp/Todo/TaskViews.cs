@@ -20,7 +20,19 @@ public sealed record TaskView(
     string? Due,
     string? Reminder,
     string? Notes,
-    string? Completed);
+    string? Completed,
+    string? Repeats,
+    List<StepView>? Steps,
+    string? Note = null);
+
+/// <summary>One step (Graph checklistItem) of a task.</summary>
+public sealed record StepView(string Id, string Text, bool Done);
+
+/// <summary>What delete_task removed, so Claude can say it.</summary>
+public sealed record DeletedTaskView(string ListId, string ListName, string Id, string Title);
+
+/// <summary>What delete_task_list removed, and how many open tasks went with it.</summary>
+public sealed record DeletedListView(string Id, string Name, int OpenTasks);
 
 public sealed record AgendaView(
     string Today,
@@ -34,7 +46,12 @@ public sealed record AgendaView(
 
 public static class TaskViews
 {
-    public static TaskView ToView(GraphTask t, GraphTaskList list, TodoClock clock)
+    /// <summary>
+    /// A task as Claude sees it. Steps are null unless the caller read them: Graph's v1.0 docs
+    /// for listing and getting tasks do not document $expand=checklistItems, so steps come from
+    /// their own request, made only where one task is returned.
+    /// </summary>
+    public static TaskView ToView(GraphTask t, GraphTaskList list, TodoClock clock, List<GraphChecklistItem>? steps = null)
     {
         DateTime? due = clock.ToLocal(t.DueDateTime);
         DateTime? reminder = t.IsReminderOn ? clock.ToLocal(t.ReminderDateTime) : null;
@@ -45,7 +62,9 @@ public static class TaskViews
             due?.ToString("yyyy-MM-dd ddd", CultureInfo.InvariantCulture),
             reminder?.ToString("yyyy-MM-dd ddd HH:mm", CultureInfo.InvariantCulture),
             string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(),
-            completed?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            completed?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            Recurrence.Describe(t.Recurrence),
+            steps?.Select(s => new StepView(s.Id, s.DisplayName, s.IsChecked)).ToList());
     }
 
     /// <summary>Sorts open tasks into the buckets Claude nags about.</summary>

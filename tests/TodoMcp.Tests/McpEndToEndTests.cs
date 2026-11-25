@@ -64,8 +64,17 @@ public class McpEndToEndTests(McpEndToEndTests.Factory factory) : IClassFixture<
         public Task<string> CreateAuthorizationHeaderAsync(IEnumerable<string> s, AuthorizationHeaderProviderOptions? o = null, ClaimsPrincipal? c = null, CancellationToken ct = default) => Task.FromResult("Bearer fake");
     }
 
+    /// <summary>
+    /// A stateless Graph. Lists: L1 Tasks (defaultList), L2 Groceries, L3 Flagged email
+    /// (flaggedEmails), L4 Work. Tasks: T1 in L1 with one step, T5 in L1 ("Plan trip") carrying
+    /// every field move_task copies plus two steps. Copies land as T9 in L2, whose steps 404 (the
+    /// move-failure case), or T50 in L4, whose step creates are echoed back. DELETE answers 204.
+    /// Anything else is a 404.
+    /// </summary>
     public sealed class FakeGraph : HttpMessageHandler
     {
+        private const string Unexpected = """{"error":{"message":"unexpected"}}""";
+
         // Shared across the test class's requests, so a concurrent collection rather than a
         // locked list (house rule 4).
         public ConcurrentQueue<GraphRequest> Requests { get; } = new ConcurrentQueue<GraphRequest>();
@@ -76,23 +85,68 @@ public class McpEndToEndTests(McpEndToEndTests.Factory factory) : IClassFixture<
             string path = request.RequestUri!.PathAndQuery;
             this.Requests.Enqueue(new GraphRequest(request.Method.Method, path, body));
 
-            string json = (request.Method.Method, request.RequestUri.AbsolutePath) switch
+            string? json = (request.Method.Method, request.RequestUri.AbsolutePath) switch
             {
                 ("GET", "/v1.0/me/todo/lists") =>
-                    """{"value":[{"id":"L1","displayName":"Tasks","wellknownListName":"defaultList"},{"id":"L2","displayName":"Groceries","wellknownListName":"none"}]}""",
+                    """{"value":[{"id":"L1","displayName":"Tasks","wellknownListName":"defaultList"},{"id":"L2","displayName":"Groceries","wellknownListName":"none"},{"id":"L3","displayName":"Flagged email","wellknownListName":"flaggedEmails"},{"id":"L4","displayName":"Work","wellknownListName":"none"}]}""",
                 ("GET", "/v1.0/me/todo/lists/L1/tasks") =>
                     """{"value":[{"id":"T1","title":"File taxes","status":"notStarted","importance":"high","dueDateTime":{"dateTime":"2020-01-01T08:00:00.0000000","timeZone":"UTC"}}]}""",
                 ("GET", "/v1.0/me/todo/lists/L2/tasks") => """{"value":[]}""",
+                ("GET", "/v1.0/me/todo/lists/L3/tasks") => """{"value":[]}""",
+                ("GET", "/v1.0/me/todo/lists/L4/tasks") =>
+                    """{"value":[{"id":"W1","title":"Expenses","status":"notStarted","importance":"normal"},{"id":"W2","title":"Timesheet","status":"inProgress","importance":"normal"}]}""",
                 ("POST", "/v1.0/me/todo/lists/L2/tasks") =>
                     """{"id":"T9","title":"Milk","status":"notStarted","importance":"normal"}""",
                 ("PATCH", "/v1.0/me/todo/lists/L1/tasks/T1") =>
                     """{"id":"T1","title":"File taxes","status":"completed","importance":"high"}""",
-                _ => """{"error":{"message":"unexpected"}}""",
+                ("GET", "/v1.0/me/todo/lists/L1/tasks/T1") =>
+                    """{"id":"T1","title":"File taxes","status":"notStarted","importance":"high","dueDateTime":{"dateTime":"2020-01-01T08:00:00.0000000","timeZone":"UTC"}}""",
+                ("DELETE", "/v1.0/me/todo/lists/L1/tasks/T1") => null,
+                ("GET", "/v1.0/me/todo/lists/L1/tasks/T1/checklistItems") =>
+                    """{"value":[{"id":"S1","displayName":"Gather receipts","isChecked":true}]}""",
+                ("POST", "/v1.0/me/todo/lists/L1/tasks/T1/checklistItems") =>
+                    """{"id":"S2","displayName":"Call accountant","isChecked":false}""",
+                ("PATCH", "/v1.0/me/todo/lists/L1/tasks/T1/checklistItems/S1") =>
+                    """{"id":"S1","displayName":"Gather receipts","isChecked":false}""",
+                ("DELETE", "/v1.0/me/todo/lists/L1/tasks/T1/checklistItems/S1") => null,
+                ("GET", "/v1.0/me/todo/lists/L1/tasks/T5") =>
+                    """
+                    {"id":"T5","title":"Plan trip","status":"inProgress","importance":"high","isReminderOn":true,
+                     "body":{"content":"<p>Bring passports</p>","contentType":"html"},
+                     "categories":["Travel"],
+                     "dueDateTime":{"dateTime":"2026-12-01T08:00:00.0000000","timeZone":"UTC"},
+                     "reminderDateTime":{"dateTime":"2026-11-30T17:00:00.0000000","timeZone":"UTC"},
+                     "recurrence":{
+                       "pattern":{"type":"weekly","interval":2,"month":0,"dayOfMonth":0,"daysOfWeek":["monday","wednesday"],"firstDayOfWeek":"sunday","index":"first"},
+                       "range":{"type":"noEnd","startDate":"2026-12-01","endDate":"0001-01-01","recurrenceTimeZone":"","numberOfOccurrences":0}}}
+                    """,
+                ("GET", "/v1.0/me/todo/lists/L1/tasks/T5/checklistItems") =>
+                    """{"value":[{"id":"S1","displayName":"Book flights","isChecked":true},{"id":"S2","displayName":"Pack","isChecked":false}]}""",
+                ("DELETE", "/v1.0/me/todo/lists/L1/tasks/T5") => null,
+                ("POST", "/v1.0/me/todo/lists/L4/tasks") =>
+                    """{"id":"T50","title":"Plan trip","status":"inProgress","importance":"high","recurrence":{"pattern":{"type":"weekly","interval":2,"daysOfWeek":["wednesday","monday"],"firstDayOfWeek":"sunday"},"range":{"type":"noEnd","startDate":"2026-12-01"}}}""",
+                ("POST", "/v1.0/me/todo/lists/L4/tasks/T50/checklistItems") => EchoStep(body),
+                ("PATCH", "/v1.0/me/todo/lists/L4") => """{"id":"L4","displayName":"Office","wellknownListName":"none"}""",
+                ("DELETE", "/v1.0/me/todo/lists/L4") => null,
+                _ => Unexpected,
             };
-            return new HttpResponseMessage(json.Contains("unexpected") ? HttpStatusCode.NotFound : HttpStatusCode.OK)
+            if (json is null)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+
+            return new HttpResponseMessage(json == Unexpected ? HttpStatusCode.NotFound : HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json"),
             };
+        }
+
+        private static string EchoStep(string? body)
+        {
+            using JsonDocument doc = JsonDocument.Parse(body!);
+            string name = doc.RootElement.GetProperty("displayName").GetString()!;
+            bool isChecked = doc.RootElement.TryGetProperty("isChecked", out JsonElement c) && c.GetBoolean();
+            return JsonSerializer.Serialize(new { id = "C-" + name, displayName = name, isChecked });
         }
     }
 
@@ -122,7 +176,25 @@ public class McpEndToEndTests(McpEndToEndTests.Factory factory) : IClassFixture<
     {
         JsonElement result = await this.Rpc("tools/list", new { });
         HashSet<string?> names = result.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToHashSet();
-        Assert.Equal(["get_agenda", "list_task_lists", "list_tasks", "create_task", "update_task", "complete_task", "create_task_list"], names);
+        string?[] expected =
+        [
+            "get_agenda", "list_task_lists", "list_tasks", "get_task", "create_task", "update_task", "complete_task",
+            "create_task_list", "rename_task_list", "delete_task_list", "delete_task", "move_task",
+            "add_step", "update_step", "delete_step",
+        ];
+        Assert.Equal(expected.Order(StringComparer.Ordinal), names.Order(StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("delete_task")]
+    [InlineData("delete_task_list")]
+    [InlineData("move_task")]
+    [InlineData("delete_step")]
+    public async Task Destructive_tools_say_so_in_their_annotations(string tool)
+    {
+        JsonElement result = await this.Rpc("tools/list", new { });
+        JsonElement entry = result.GetProperty("tools").EnumerateArray().Single(t => t.GetProperty("name").GetString() == tool);
+        Assert.True(entry.GetProperty("annotations").GetProperty("destructiveHint").GetBoolean(), entry.ToString());
     }
 
     [Fact]

@@ -12,5 +12,9 @@ internal static class ServerText
         - Dates are in the user's time zone; get_agenda returns today's date and the current time.
           Convert phrases like "tomorrow" or "Friday 3pm" to the ISO formats the tools ask for.
         - Confirm with the user before completing or changing tasks they did not clearly name.
+        - Deleting a task, deleting a list and moving a task cannot be undone. Before calling
+          delete_task, delete_task_list or move_task, confirm with the user, naming the task or list,
+          unless they named it themselves in this request.
+        - To change a task, update it with update_task rather than deleting and recreating it.
         """;
 }
